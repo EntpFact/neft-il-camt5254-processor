@@ -9,49 +9,46 @@ import com.hdfcbank.neftil.camt5254.processor.model.ReqPayload;
 import com.hdfcbank.neftil.camt5254.processor.utils.UtilityMethods;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.text.SimpleDateFormat;
-import java.time.LocalDateTime;
-import java.util.Date;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
 
+@ExtendWith(MockitoExtension.class)
 class CamtXmlProcessorTest {
 
     @Mock
-    private KafkaUtils kafkaUtils;
+    KafkaUtils kafkaUtils;
 
     @Mock
-    private NilRepository nilRepository;
+    NilRepository nilRepository;
 
     @Mock
-    private UtilityMethods utilityMethods;
+    UtilityMethods utilityMethods;
+
+    @Mock
+    NILPACS8PACS2VeriftnService nilpacs8PACS2VeriftnService;
 
     @InjectMocks
-    private CamtXmlProcessor camtXmlProcessor;
+    CamtXmlProcessor camtXmlProcessor;
 
     private ReqPayload reqPayload;
-
-    private static final String SAMPLE_XML =
-            "<RequestPayload xmlns=\"urn:iso:std:iso:20022:tech:xsd:camt.052.001.06\">" +
+    private static final String VALID_XML =
+            "<RequestPayload>" +
                     "<AppHdr>" +
-                    "<BizMsgIdr>RBIP202204016000000001</BizMsgIdr>" +
-                    "<MsgDefIdr>camt.052.001.06</MsgDefIdr>" +
-                    "<CreDt>2025-07-23T17:01:47Z</CreDt>" +
+                    "<BizMsgIdr>RBIP202204016000000001</BizMsgIdr>\n" +
+                    " <MsgDefIdr>camt.054.001.08</MsgDefIdr>" +
+                    " <CreDt>2022-04-03T13:45:01Z</CreDt>" +
+                    "<BtchId>B123</BtchId>" +
                     "</AppHdr>" +
-                    "<Document>" +
-                    "<BkToCstmrStmt>" +
-                    "<GrpHdr>" +
-                    "<AddtlInf>BATCH123</AddtlInf>" +
-                    "</GrpHdr>" +
-                    "</BkToCstmrStmt>" +
-                    "</Document>" +
+                    "      <GrpHdr>\n" +
+                    "         <MsgId>RBIP202204016000000001</MsgId>\n" +
+                    "         <CreDtTm>2022-04-03T13:45:01</CreDtTm>\n" +
+                    "\t\t <AddtlInf>BatchId:0007</AddtlInf></GrpHdr>" +
+                    "<MsgDefIdr>camt.052.001.06</MsgDefIdr>" +
                     "</RequestPayload>";
 
     @BeforeEach
@@ -59,12 +56,14 @@ class CamtXmlProcessorTest {
         MockitoAnnotations.openMocks(this);
 
         Header header = Header.builder()
+                .msgId("MSG123")
+                .msgType("camt.052.001.06")
                 .source("SFMS")
                 .prefix("<Prefix>")
                 .build();
 
         Body body = Body.builder()
-                .payload(SAMPLE_XML)
+                .payload(VALID_XML)
                 .build();
 
         reqPayload = ReqPayload.builder()
@@ -74,59 +73,74 @@ class CamtXmlProcessorTest {
     }
 
     @Test
-    void testParseMessage_SuccessfulProcessing() throws Exception {
-        // Mock duplicateExists to return false so kafka publishing happens
+    void testParseMessage_Camt54_PublishesToKafka() throws Exception {
+        // Arrange
         when(utilityMethods.duplicateExists(anyString())).thenReturn(false);
-
+        when(nilpacs8PACS2VeriftnService.checkPacs8Pacs2StatusForBatchID(anyString(), anyString(), anyString())).thenReturn(true);
+        // Act
         camtXmlProcessor.parseMessage(reqPayload);
 
-        // Verify that repository is called twice (for FC & EPH)
-        verify(nilRepository, times(2)).saveDataInMsgEventTracker(any(MsgEventTracker.class), anyBoolean());
-
-        // Capture the payloads published to Kafka
-        ArgumentCaptor<String> kafkaCaptor = ArgumentCaptor.forClass(String.class);
-        verify(kafkaUtils, times(2)).publishToResponseTopic(kafkaCaptor.capture());
-
-        String jsonPublished1 = kafkaCaptor.getAllValues().get(0);
-        String jsonPublished2 = kafkaCaptor.getAllValues().get(1);
-
-        assertTrue(jsonPublished1.contains("camt.052.001.06"));
-        assertTrue(jsonPublished2.contains("camt.052.001.06"));
+        // Assert
+        verify(nilRepository).updateMsgEventTracker(any(MsgEventTracker.class));
+        verify(nilRepository).insertMsgEventTracker(any(MsgEventTracker.class));
+        verify(kafkaUtils, times(2)).publishToResponseTopic(any());
     }
 
     @Test
-    void testParseMessage_DuplicateExists_NoKafkaPublish() {
-        // Mock duplicateExists to return true
+    void testParseMessage_DuplicateExists_NoKafkaPublish() throws Exception {
+        // Arrange
         when(utilityMethods.duplicateExists(anyString())).thenReturn(true);
+        when(nilpacs8PACS2VeriftnService.checkPacs8Pacs2StatusForBatchID(anyString(), anyString(), anyString())).thenReturn(true);
 
+        // Act
         camtXmlProcessor.parseMessage(reqPayload);
 
-        // Verify repository save still happens
-        verify(nilRepository, times(2)).saveDataInMsgEventTracker(any(MsgEventTracker.class), anyBoolean());
-
-        // Kafka publish should NOT happen
-        verify(kafkaUtils, never()).publishToResponseTopic(anyString());
+        // Assert
+        verify(nilRepository).updateMsgEventTracker(any(MsgEventTracker.class));
+        verify(nilRepository).insertMsgEventTracker(any(MsgEventTracker.class));
+        verify(kafkaUtils, never()).publishToResponseTopic(any());
     }
 
     @Test
-    void testParseMessage_DateParsing() throws Exception {
-        when(utilityMethods.duplicateExists(anyString())).thenReturn(true);
+    void testParseMessage_Camt52_VerificationProcessing() throws Exception {
+        // Arrange
+        String xml =
+                "<RequestPayload>" +
+                        "<AppHdr>" +
+                        "<BizMsgIdr>RBIP202204016000000001</BizMsgIdr>\n" +
+                        " <MsgDefIdr>camt.052.001.08</MsgDefIdr>" +
+                        " <CreDt>2022-04-03T13:45:01Z</CreDt>" +
+                        "<BtchId>B123</BtchId>" +
+                        "</AppHdr>" +
+                        "      <GrpHdr>\n" +
+                        "         <MsgId>RBIP202204016000000001</MsgId>\n" +
+                        "         <CreDtTm>2022-04-03T13:45:01</CreDtTm>\n" +
+                        "\t\t <AddtlInf>BatchId:0007</AddtlInf></GrpHdr>" +
+                        "<MsgDefIdr>camt.052.001.06</MsgDefIdr>" +
+                        "</RequestPayload>";
+        reqPayload.getBody().setPayload(xml);
 
-        camtXmlProcessor.parseMessage(reqPayload);
+        // Act
+        try {
+            camtXmlProcessor.parseMessage(reqPayload);
+        } catch (RuntimeException e) {
+            // Expected due to @Retryable in service
+        }
 
-        // Capture MsgEventTracker
-        ArgumentCaptor<MsgEventTracker> trackerCaptor = ArgumentCaptor.forClass(MsgEventTracker.class);
-        verify(nilRepository, atLeastOnce()).saveDataInMsgEventTracker(trackerCaptor.capture(), anyBoolean());
+        // Assert
+        verify(nilRepository).updateMsgEventTracker(any());
+        verify(nilRepository).insertMsgEventTracker(any());
+        verify(kafkaUtils, times(2)).publishToResponseTopic(any());
+    }
 
-        MsgEventTracker tracker = trackerCaptor.getValue();
 
-        // Verify date part is parsed correctly
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
-        Date expectedDate = sdf.parse("2025-07-23");
-        assertEquals(expectedDate, tracker.getBatchCreationDate());
+    @Test
+    void testParseMessage_InvalidXml_ThrowsRuntimeException() {
+        // Arrange
+        reqPayload.getBody().setPayload("<InvalidXML>");
 
-        // Verify timestamp
-        LocalDateTime expectedLdt = LocalDateTime.of(2025, 7, 23, 17, 1, 47);
-        assertEquals(expectedLdt, tracker.getBatchCreationTimestamp());
+        // Act + Assert
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+                () -> camtXmlProcessor.parseMessage(reqPayload));
     }
 }

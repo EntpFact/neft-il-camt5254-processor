@@ -22,11 +22,14 @@ import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.xpath.XPathExpressionException;
 import java.io.IOException;
 import java.io.StringReader;
+import java.math.BigDecimal;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Date;
 
 import static com.hdfcbank.neftil.camt5254.processor.utils.Constants.*;
@@ -45,6 +48,9 @@ public class CamtXmlProcessor {
     @Autowired
     UtilityMethods utilityMethods;
 
+    @Autowired
+    NILPACS8PACS2VeriftnService nilpacs8PACS2VeriftnService;
+
     public void parseMessage(ReqPayload reqPayload) {
 
         try {
@@ -61,8 +67,16 @@ public class CamtXmlProcessor {
             String batchId = UtilityMethods.getValueByXPath(document, BATCH_ID_XPATH);
             String batchDateTime = UtilityMethods.getValueByXPath(document, BATCH_CREDT_XPATH);
 
+            if (msgType.equals("camt.054.001.08")) {
+                Boolean canProceed = nilpacs8PACS2VeriftnService.checkPacs8Pacs2StatusForBatchID(batchId, batchDateTime, msgId);
+                if (Boolean.TRUE.equals(!canProceed)) {
+                    return;
+                }
+            }
+
             // Extract first 10 chars (yyyy-MM-dd)
             String datePart = batchDateTime.substring(0, 10);
+            LocalDate localDate = LocalDate.parse(datePart, DateTimeFormatter.ofPattern("yyyy-MM-dd"));
 
             // Parse into java.util.Date
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
@@ -73,31 +87,19 @@ public class CamtXmlProcessor {
             // Convert to LocalDateTime in UTC (or your Zone)
             LocalDateTime localDateTime = instant.atZone(ZoneId.of("UTC")).toLocalDateTime();
 
-
-            MsgEventTracker tracker = new MsgEventTracker();
-
-            tracker.setMsgId(msgId);
-            tracker.setSource(reqPayload.getHeader().getSource());
-            tracker.setTarget(DISPATCHER_FC);
-            tracker.setFlowType(INWARD);
-            tracker.setMsgType(msgType);
-            tracker.setBatchCreationDate(date);
-            tracker.setBatchCreationTimestamp(localDateTime);
-            tracker.setOrgnlReq(reqPayload.getHeader().getPrefix() + reqPayload.getBody().getPayload());
-            tracker.setBatchId(batchId);
-
-            // Save to msg_event_tracker table : FC
-            nilRepository.saveDataInMsgEventTracker(tracker, false);
-            // Save to msg_event_tracker table : EPH
-            tracker.setTarget(DISPATCHER_EPH);
-            nilRepository.saveDataInMsgEventTracker(tracker, true);
-
             ReqPayload reqPayldFC = getReqPayload(reqPayload, msgId, msgType, DISPATCHER_FC);
             ReqPayload reqPayldEPH = getReqPayload(reqPayload, msgId, msgType, DISPATCHER_EPH);
-
             ObjectMapper mapper = new ObjectMapper();
             String jsonFC = mapper.writeValueAsString(reqPayldFC);
             String jsonEPH = mapper.writeValueAsString(reqPayldEPH);
+
+            MsgEventTracker messageEventTrackerFC = buildMsgEventTracker(msgId, msgType, batchId, localDate, localDateTime, DISPATCHER_FC, reqPayload.getHeader().getPrefix() + reqPayload.getBody().getPayload(), jsonFC);
+
+            MsgEventTracker messageEventTrackerEPH = buildMsgEventTracker(msgId, msgType, batchId, localDate, localDateTime, DISPATCHER_EPH, reqPayload.getHeader().getPrefix() + reqPayload.getBody().getPayload(), jsonEPH);
+
+
+            nilRepository.updateMsgEventTracker(messageEventTrackerFC);
+            nilRepository.insertMsgEventTracker(messageEventTrackerEPH);
 
             if (!utilityMethods.duplicateExists(msgId)) {
                 // Send to FC and EPH topic
@@ -109,12 +111,23 @@ public class CamtXmlProcessor {
             }
 
         } catch (ParserConfigurationException | IOException | SAXException | XPathExpressionException e) {
+            log.error(e.toString());
             throw new RuntimeException(e);
         } catch (ParseException e) {
+            log.error(e.toString());
             throw new RuntimeException(e);
         }
 
 
+    }
+
+    private MsgEventTracker buildMsgEventTracker(String msgId, String msgType, String batchId, LocalDate date, LocalDateTime batchDateTime, String target, String reqPayload, String transformedJson) {
+        return MsgEventTracker.builder().msgId(msgId).source(SFMS).msgType(msgType).
+                flowType(INWARD).batchId(batchId).batchCreationTimestamp(batchDateTime).
+                batchCreationDate(java.sql.Date.valueOf(date)).status(SENT_TO_DISPATCHER)
+                .consolidateAmt(null).orgnlReq(reqPayload).orgnlReqCount(null).transformedJsonReq(transformedJson)
+                .intermediateReq(null).intermediateCount(null).target(target)
+                .invalidReq(false).replayCount(0).version(BigDecimal.ONE).build();
     }
 
     private static ReqPayload getReqPayload(ReqPayload reqPayload, String msgId, String msgType, String target) {

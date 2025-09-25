@@ -63,6 +63,11 @@ message:
       # Add more message types and their XPaths as needed
     #pacs.008.001.09: pacs008
 
+camt54:
+  db:
+    validate_pacs008_pacs002_query: SELECT COUNT(1) FROM network_il.batch_tracker WHERE batch_id = :batchId AND msg_type IN ('pacs.008.001.09', 'pacs.002.001.11') AND status = 'Hold';
+    update_batch_tracker_hold_by_msgid_query: UPDATE network_il.batch_tracker SET status = 'Hold' WHERE msg_id = :msgId
+
 errormessage:
   pacs008: EPH
   pacs004: EPH
@@ -84,9 +89,17 @@ errormessage:
 topic:
   dispatchertopic: DISPATCHERTOPIC
 
-cug_flag: ${CUG_FLAG:false}
+batch-tracker:
+  allowedMsgTypes:
+    - pacs.008.001.09
+    - pacs.002.001.11
+    - camt.054.001.08
 
-mod_logic:
-  mod_denominator: ${MOD_DENOMINATOR:100}
-  eph_percentage: ${EPH_PERCENTAGE:5}
+retry:
+  transactionAudit:
+    maxAttempts: ${RETRY_TXN_MAX_ATTEMPTS:3}
+    backoff:
+      delay: ${RETRY_TXN_BACKOFF_DELAY_MS:200}
+      multiplier: ${RETRY_TXN_BACKOFF_MULTIPLIER:2.0}
+
 

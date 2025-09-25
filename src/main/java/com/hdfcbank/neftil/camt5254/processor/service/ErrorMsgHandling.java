@@ -40,13 +40,17 @@ public class ErrorMsgHandling {
             String jsonFC = mapper.writeValueAsString(reqPayload);
             // Save to error msg_event_tracker table
             tracker.setTarget(DISPATCHER_FC);
-            nilRepository.saveDataInMsgEventTracker(tracker, false);
+            tracker.setTransformedJsonReq(jsonFC);
+            nilRepository.updateMsgEventTracker(tracker);
+            //nilRepository.saveDataInMsgEventTracker(tracker, false);
 
             reqPayload.getHeader().setTarget(DISPATCHER_EPH);
             String jsonEPH = mapper.writeValueAsString(reqPayload);
             // Save to error msg_event_tracker table
             tracker.setTarget(DISPATCHER_EPH);
-            nilRepository.saveDataInMsgEventTracker(tracker, true);
+            tracker.setTransformedJsonReq(jsonEPH);
+            nilRepository.insertMsgEventTracker(tracker);
+            //nilRepository.saveDataInMsgEventTracker(tracker, true);
 
 
             // Send to dispatcher topic

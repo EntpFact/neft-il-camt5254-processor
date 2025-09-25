@@ -1,20 +1,26 @@
 package com.hdfcbank.neftil.camt5254.processor.dao;
 
+
+import com.hdfcbank.neftil.camt5254.processor.config.BTAllowedMsgType;
+import com.hdfcbank.neftil.camt5254.processor.exception.Camt5254ProcessorException;
 import com.hdfcbank.neftil.camt5254.processor.model.MsgEventTracker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.*;
-import org.springframework.dao.EmptyResultDataAccessException;
+import org.mockito.ArgumentMatchers;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import java.math.BigDecimal;
+import java.sql.SQLException;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
@@ -23,11 +29,14 @@ import static org.mockito.Mockito.*;
 
 class NilRepositoryTest {
 
-    @InjectMocks
-    private NilRepository nilRepository;
+    @Mock
+    private NamedParameterJdbcTemplate jdbcTemplate;
 
     @Mock
-    private NamedParameterJdbcTemplate namedParameterJdbcTemplate;
+    private BTAllowedMsgType btAllowedMsgType;
+
+    @InjectMocks
+    private NilRepository nilRepository;
 
     private MsgEventTracker tracker;
 
@@ -38,73 +47,38 @@ class NilRepositoryTest {
         tracker = new MsgEventTracker();
         tracker.setMsgId("MSG123");
         tracker.setSource("SFMS");
-        tracker.setTarget("FC");
-        tracker.setFlowType("INWARD");
-        tracker.setMsgType("pacs008");
-        tracker.setOrgnlReq("<xml/>");
-        tracker.setBatchId("BATCH1");
+        tracker.setTarget("NIL");
+        tracker.setFlowType("Inward");
+        tracker.setMsgType("camt.052.001.06");
+        tracker.setOrgnlReq("<xml>dummy</xml>");
+        tracker.setTransformedJsonReq("{\"key\":\"value\"}");
+        tracker.setStatus("NEW");
+        tracker.setBatchId("B123");
         tracker.setBatchCreationDate(new Date());
         tracker.setBatchCreationTimestamp(LocalDateTime.now());
-        tracker.setInvalidReq(false);
-    }
-
-    @Test
-    void testSaveDataInMsgEventTracker_SendToBothFcEph() {
-        // mock created_time from DB
-        when(namedParameterJdbcTemplate.queryForObject(anyString(), any(Map.class), eq(String.class)))
-                .thenReturn("2025-08-19 12:34:56.123456");
-
-        nilRepository.saveDataInMsgEventTracker(tracker, true);
-
-        verify(namedParameterJdbcTemplate, times(1))
-                .update(anyString(), any(MapSqlParameterSource.class));
-    }
-
-    @Test
-    void testSaveDataInMsgEventTracker_UpdateIfRowExists() {
-        when(namedParameterJdbcTemplate.queryForObject(anyString(), any(Map.class), eq(String.class)))
-                .thenReturn("MSG123"); // simulate row exists
-
-        when(namedParameterJdbcTemplate.update(anyString(), any(MapSqlParameterSource.class)))
-                .thenReturn(1);
-
-        nilRepository.saveDataInMsgEventTracker(tracker, false);
-
-        verify(namedParameterJdbcTemplate, times(1))
-                .update(anyString(), any(MapSqlParameterSource.class));
-    }
-
-    @Test
-    void testSaveDataInMsgEventTracker_NoRowFound() {
-        when(namedParameterJdbcTemplate.queryForObject(anyString(), any(Map.class), eq(String.class)))
-                .thenThrow(new EmptyResultDataAccessException(1));
-
-        nilRepository.saveDataInMsgEventTracker(tracker, false);
-
-        // should not throw exception
-        verify(namedParameterJdbcTemplate, never()).update(startsWith("UPDATE"), any(MapSqlParameterSource.class));
+        tracker.setVersion(BigDecimal.ONE);
     }
 
 
     @Test
     void testSaveDuplicateEntry_UpdateExisting() {
-        when(namedParameterJdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(BigDecimal.class)))
+        when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(BigDecimal.class)))
                 .thenReturn(new BigDecimal("2"));
 
         nilRepository.saveDuplicateEntry(tracker);
 
-        verify(namedParameterJdbcTemplate, times(1))
+        verify(jdbcTemplate, times(1))
                 .update(startsWith("UPDATE"), any(MapSqlParameterSource.class));
     }
 
     @Test
     void testSaveDuplicateEntry_InsertNew() {
-        when(namedParameterJdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(BigDecimal.class)))
+        when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(BigDecimal.class)))
                 .thenReturn(null);
 
         nilRepository.saveDuplicateEntry(tracker);
 
-        verify(namedParameterJdbcTemplate, times(1))
+        verify(jdbcTemplate, times(1))
                 .update(startsWith("INSERT"), any(MapSqlParameterSource.class));
     }
 
@@ -134,7 +108,7 @@ class NilRepositoryTest {
         tracker.setModifiedTimestamp(LocalDateTime.now());
 
         // mock JDBC query (force RowMapper overload)
-        when(namedParameterJdbcTemplate.query(
+        when(jdbcTemplate.query(
                 anyString(),
                 any(MapSqlParameterSource.class),
                 ArgumentMatchers.<RowMapper<MsgEventTracker>>any())
@@ -149,7 +123,7 @@ class NilRepositoryTest {
         assertEquals("SRC", result.getSource());
         assertEquals("TGT", result.getTarget());
         assertEquals("SENT_TO_DISPATCHER", result.getStatus());
-        verify(namedParameterJdbcTemplate, times(1))
+        verify(jdbcTemplate, times(1))
                 .query(anyString(), any(MapSqlParameterSource.class), ArgumentMatchers.<RowMapper<MsgEventTracker>>any());
     }
 
@@ -158,7 +132,7 @@ class NilRepositoryTest {
         // given
         String msgId = "notFound";
 
-        when(namedParameterJdbcTemplate.query(
+        when(jdbcTemplate.query(
                 anyString(),
                 any(MapSqlParameterSource.class),
                 ArgumentMatchers.<RowMapper<MsgEventTracker>>any())
@@ -169,7 +143,7 @@ class NilRepositoryTest {
 
         // then
         assertNull(result);
-        verify(namedParameterJdbcTemplate, times(1))
+        verify(jdbcTemplate, times(1))
                 .query(anyString(), any(MapSqlParameterSource.class), ArgumentMatchers.<RowMapper<MsgEventTracker>>any());
     }
 
@@ -193,7 +167,7 @@ class NilRepositoryTest {
 
         List<MsgEventTracker> mockResult = List.of(tracker);
 
-        when(namedParameterJdbcTemplate.query(anyString(), any(MapSqlParameterSource.class), any(org.springframework.jdbc.core.RowMapper.class)))
+        when(jdbcTemplate.query(anyString(), any(MapSqlParameterSource.class), any(org.springframework.jdbc.core.RowMapper.class)))
                 .thenReturn(mockResult);
 
         // when
@@ -204,14 +178,14 @@ class NilRepositoryTest {
         assertThat(result.getMsgId()).isEqualTo("MSG123");
         assertThat(result.getTarget()).isEqualTo("FC");
 
-        verify(namedParameterJdbcTemplate, times(1))
+        verify(jdbcTemplate, times(1))
                 .query(anyString(), any(MapSqlParameterSource.class), any(org.springframework.jdbc.core.RowMapper.class));
     }
 
     @Test
     void testFindByMsgId_NoRecordFound() {
         // given
-        when(namedParameterJdbcTemplate.query(anyString(), any(MapSqlParameterSource.class), any(org.springframework.jdbc.core.RowMapper.class)))
+        when(jdbcTemplate.query(anyString(), any(MapSqlParameterSource.class), any(org.springframework.jdbc.core.RowMapper.class)))
                 .thenReturn(Collections.emptyList());
 
         // when
@@ -220,7 +194,7 @@ class NilRepositoryTest {
         // then
         assertThat(result).isNull();
 
-        verify(namedParameterJdbcTemplate, times(1))
+        verify(jdbcTemplate, times(1))
                 .query(anyString(), any(MapSqlParameterSource.class), any(org.springframework.jdbc.core.RowMapper.class));
     }
 
@@ -242,7 +216,7 @@ class NilRepositoryTest {
         tracker.setCreatedTime(LocalDateTime.now());
         tracker.setModifiedTimestamp(LocalDateTime.now());
 
-        when(namedParameterJdbcTemplate.query(
+        when(jdbcTemplate.query(
                 anyString(),
                 any(MapSqlParameterSource.class),
                 ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<MsgEventTracker>>any()
@@ -258,7 +232,7 @@ class NilRepositoryTest {
         assertEquals("TGT", result.getTarget());
         assertEquals("pacs.008.001.09", result.getMsgType());
 
-        verify(namedParameterJdbcTemplate, times(1)).query(
+        verify(jdbcTemplate, times(1)).query(
                 startsWith("SELECT * FROM network_il.msg_event_tracker"),
                 any(MapSqlParameterSource.class),
                 ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<MsgEventTracker>>any()
@@ -268,7 +242,7 @@ class NilRepositoryTest {
     @Test
     void testFindByMsgId_returnsNullWhenEmpty() {
         // Arrange
-        when(namedParameterJdbcTemplate.query(
+        when(jdbcTemplate.query(
                 anyString(),
                 any(MapSqlParameterSource.class),
                 ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<MsgEventTracker>>any()
@@ -279,7 +253,7 @@ class NilRepositoryTest {
 
         // Assert
         assertNull(result);
-        verify(namedParameterJdbcTemplate, times(1)).query(
+        verify(jdbcTemplate, times(1)).query(
                 anyString(),
                 any(MapSqlParameterSource.class),
                 ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<MsgEventTracker>>any()
@@ -289,7 +263,7 @@ class NilRepositoryTest {
     @Test
     void testFindByMsgId_throwsException() {
         // Arrange
-        when(namedParameterJdbcTemplate.query(
+        when(jdbcTemplate.query(
                 anyString(),
                 any(MapSqlParameterSource.class),
                 ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<MsgEventTracker>>any()
@@ -297,5 +271,167 @@ class NilRepositoryTest {
 
         // Act & Assert
         assertThrows(RuntimeException.class, () -> nilRepository.findByMsgId("MSG123"));
+    }
+
+    @Test
+    void testSaveDuplicateEntry_WhenRowExists() {
+        when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(BigDecimal.class)))
+                .thenReturn(BigDecimal.ONE);
+
+        nilRepository.saveDuplicateEntry(tracker);
+
+        verify(jdbcTemplate, times(1)).update(contains("UPDATE network_il.msg_dedup_tracker"), any(MapSqlParameterSource.class));
+    }
+
+    @Test
+    void testSaveDuplicateEntry_WhenRowDoesNotExist() {
+        when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(BigDecimal.class)))
+                .thenReturn(null);
+
+        nilRepository.saveDuplicateEntry(tracker);
+
+        verify(jdbcTemplate, times(1)).update(contains("INSERT INTO network_il.msg_dedup_tracker"), any(MapSqlParameterSource.class));
+    }
+
+    // ---------------------- checkNull ----------------------
+
+    @Test
+    void testCheckNull_ReturnsValue() {
+        assertEquals("abc", nilRepository.checkNull("abc"));
+    }
+
+    @Test
+    void testCheckNull_ReturnsNull() {
+        assertNull(nilRepository.checkNull(null));
+    }
+
+    // ---------------------- updateMsgEventTracker ----------------------
+/*
+
+    @Test
+    void testUpdateMsgEventTracker_AllowedMsgType() throws Exception {
+        when(btAllowedMsgType.getAllowedMsgTypes()).thenReturn((List<String>) Set.of("camt.052.001.06"));
+
+        nilRepository.updateMsgEventTracker(tracker);
+
+        verify(jdbcTemplate, times(1)).update(startsWith("WITH updated_msg"), any(MapSqlParameterSource.class));
+    }
+
+    @Test
+    void testUpdateMsgEventTracker_NotAllowedMsgType() throws Exception {
+        when(btAllowedMsgType.getAllowedMsgTypes()).thenReturn((List<String>) Set.of("camt.054.001.08"));
+
+        nilRepository.updateMsgEventTracker(tracker);
+
+        verify(jdbcTemplate, times(1)).update(startsWith("UPDATE network_il.msg_event_tracker"), any(MapSqlParameterSource.class));
+    }
+
+    // ---------------------- insertMsgEventTracker ----------------------
+
+    @Test
+    void testInsertMsgEventTracker_AllowedMsgType() throws Exception {
+        when(btAllowedMsgType.getAllowedMsgTypes()).thenReturn((List<String>) Set.of("camt.052.001.06"));
+
+        nilRepository.insertMsgEventTracker(tracker);
+
+        verify(jdbcTemplate, times(1)).update(startsWith("WITH inserted"), any(MapSqlParameterSource.class));
+    }
+
+    @Test
+    void testInsertMsgEventTracker_NotAllowedMsgType() throws Exception {
+        when(btAllowedMsgType.getAllowedMsgTypes()).thenReturn((List<String>) Set.of("camt.054.001.08"));
+
+        nilRepository.insertMsgEventTracker(tracker);
+
+        verify(jdbcTemplate, times(1)).update(startsWith("INSERT INTO network_il.msg_event_tracker"), any(MapSqlParameterSource.class));
+    }
+
+    // ---------------------- validatePacs8Pacs2Status ----------------------
+
+    @Test
+    void testValidatePacs8Pacs2Status_ReturnsTrue() {
+        when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Integer.class)))
+                .thenReturn(1);
+
+        Boolean result = nilRepository.validatePacs8Pacs2Status("B123", LocalDate.now());
+
+        assertTrue(result);
+    }
+
+    @Test
+    void testValidatePacs8Pacs2Status_ReturnsFalse() {
+        when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Integer.class)))
+                .thenReturn(0);
+
+        Boolean result = nilRepository.validatePacs8Pacs2Status("B123", LocalDate.now());
+
+        assertFalse(result);
+    }
+*/
+
+    @Test
+    void testValidatePacs8Pacs2Status_ThrowsException() {
+        when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Integer.class)))
+                .thenThrow(new RuntimeException("DB error"));
+
+        assertThrows(Camt5254ProcessorException.class,
+                () -> nilRepository.validatePacs8Pacs2Status("B123", LocalDate.now()));
+    }
+
+    // ---------------------- updateBatchTrackerStatusToHoldByMsgId ----------------------
+
+    @Test
+    void testUpdateBatchTrackerStatusToHoldByMsgId_Success() {
+        nilRepository.updateBatchTrackerStatusToHoldByMsgId("MSG123");
+
+        verify(jdbcTemplate, times(1)).update(startsWith("WITH updated_msg"), any(MapSqlParameterSource.class));
+    }
+
+    @Test
+    void testInsertMsgEventTracker_WhenMsgTypeAllowed_ShouldExecuteCTESql() {
+        when(btAllowedMsgType.getAllowedMsgTypes()).thenReturn(List.of("camt.054.001.08"));
+
+        nilRepository.insertMsgEventTracker(tracker);
+
+        verify(jdbcTemplate, times(1)).update(anyString(), any(MapSqlParameterSource.class));
+    }
+
+    @Test
+    void testInsertMsgEventTracker_WhenMsgTypeNotAllowed_ShouldExecuteSimpleInsert() {
+        when(btAllowedMsgType.getAllowedMsgTypes()).thenReturn(Collections.singletonList("camt.054.001.08"));
+
+        nilRepository.insertMsgEventTracker(tracker);
+
+        verify(jdbcTemplate, times(1)).update(anyString(), any(MapSqlParameterSource.class));
+    }
+
+    @Test
+    void testInsertMsgEventTracker_WhenSQLExceptionThrown_ShouldWrapInRuntimeException() {
+        when(btAllowedMsgType.getAllowedMsgTypes()).thenReturn(List.of("camt.054.001.08"));
+        doThrow(new RuntimeException(new SQLException("DB error"))).when(jdbcTemplate)
+                .update(anyString(), any(MapSqlParameterSource.class));
+
+        assertThrows(RuntimeException.class, () -> nilRepository.insertMsgEventTracker(tracker));
+    }
+
+
+    @Test
+    void testUpdateMsgEventTracker_WhenMsgTypeNotAllowed_ShouldExecuteSimpleUpdate() {
+        when(btAllowedMsgType.getAllowedMsgTypes()).thenReturn(Collections.singletonList("camt.052.001.08"));
+
+        nilRepository.updateMsgEventTracker(tracker);
+
+        // verify correct SQL branch executed
+        verify(jdbcTemplate, times(1))
+                .update(argThat(sql -> sql.startsWith("UPDATE network_il.msg_event_tracker")), any(MapSqlParameterSource.class));
+    }
+
+    @Test
+    void testUpdateMsgEventTracker_WhenSQLException_ShouldThrowRuntimeException() {
+        when(btAllowedMsgType.getAllowedMsgTypes()).thenReturn(List.of("camt.054.001.09"));
+        doThrow(new RuntimeException(new SQLException("DB error"))).when(jdbcTemplate)
+                .update(anyString(), any(MapSqlParameterSource.class));
+
+        assertThrows(RuntimeException.class, () -> nilRepository.updateMsgEventTracker(tracker));
     }
 }

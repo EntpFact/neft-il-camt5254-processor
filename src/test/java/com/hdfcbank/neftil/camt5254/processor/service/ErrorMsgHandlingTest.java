@@ -13,8 +13,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 class ErrorMsgHandlingTest {
@@ -53,35 +52,30 @@ class ErrorMsgHandlingTest {
 
     @Test
     void testErrorMessageAudit_Success() {
+        // when
         errorMsgHandling.errorMessageAudit(reqPayload);
 
-        // Verify NilRepository is called twice (FC & EPH)
-        verify(nilRepository, times(2)).saveDataInMsgEventTracker(any(MsgEventTracker.class), anyBoolean());
-
-        // Verify KafkaUtils is called twice (FC & EPH)
+        // then
+        verify(nilRepository, times(1)).updateMsgEventTracker(any(MsgEventTracker.class));
+        verify(nilRepository, times(1)).insertMsgEventTracker(any(MsgEventTracker.class));
         verify(kafkaUtils, times(2)).publishToResponseTopic(anyString());
 
-        // Capture one MsgEventTracker and check values
-        ArgumentCaptor<MsgEventTracker> trackerCaptor = ArgumentCaptor.forClass(MsgEventTracker.class);
-        verify(nilRepository, atLeastOnce()).saveDataInMsgEventTracker(trackerCaptor.capture(), anyBoolean());
+        // Capture FC tracker
+        ArgumentCaptor<MsgEventTracker> fcCaptor = ArgumentCaptor.forClass(MsgEventTracker.class);
+        verify(nilRepository).updateMsgEventTracker(fcCaptor.capture());
 
-        MsgEventTracker tracker = trackerCaptor.getValue();
-        assertEquals("MSG123", tracker.getMsgId());
-        assertEquals("camt.052.001.06", tracker.getMsgType());
-        assertTrue(tracker.getInvalidReq());
-        assertEquals("SFMS", tracker.getSource());
-        assertEquals(reqPayload.getBody().getPayload(), tracker.getOrgnlReq());
+        MsgEventTracker fcTracker = fcCaptor.getValue();
+        assertThat(fcTracker.getMsgId()).isEqualTo("MSG123");
+        assertThat(fcTracker.getTarget()).isEqualTo("EPH_DISPATCHER");
+        assertThat(fcTracker.getTransformedJsonReq()).isNotBlank();
+
+        // Capture EPH tracker
+        ArgumentCaptor<MsgEventTracker> ephCaptor = ArgumentCaptor.forClass(MsgEventTracker.class);
+        verify(nilRepository).insertMsgEventTracker(ephCaptor.capture());
+
+        MsgEventTracker ephTracker = ephCaptor.getValue();
+        assertThat(ephTracker.getMsgId()).isEqualTo("MSG123");
+        assertThat(ephTracker.getTarget()).isEqualTo("EPH_DISPATCHER");
+        assertThat(ephTracker.getTransformedJsonReq()).isNotBlank();
     }
-
-    @Test
-    void testErrorMessageAudit_KafkaJsonProduced() throws Exception {
-        errorMsgHandling.errorMessageAudit(reqPayload);
-
-        // Capture JSON messages published
-        ArgumentCaptor<String> kafkaCaptor = ArgumentCaptor.forClass(String.class);
-        verify(kafkaUtils, times(2)).publishToResponseTopic(kafkaCaptor.capture());
-
-    }
-
-
 }
