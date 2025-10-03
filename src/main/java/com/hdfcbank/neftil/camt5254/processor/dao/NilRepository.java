@@ -132,7 +132,7 @@ public class NilRepository {
             String sql = "WITH updated_msg AS ( " +
                     "  UPDATE network_il.msg_event_tracker " +
                     "  SET source = :source, target = :target, batch_id = :batchId, flow_type = :flowType, " +
-                    "      msg_type = :msgType, original_req = :originalReq, invalid_msg = :invalidMsg, transformed_json_req= :transformedJsonReq " +
+                    "      msg_type = :msgType, original_req = :originalReq, invalid_msg = :invalidMsg, transformed_json_req= :transformedJsonReq, " +
                     "      replay_count = :replayCount, original_req_count = :originalReqCount, " +
                     "      consolidate_amt = :consolidateAmt, intermediate_req = :intermediateReq, " +
                     "      intemdiate_count = :intemdiateCount, status = :status, " +
@@ -159,13 +159,17 @@ public class NilRepository {
 
             MapSqlParameterSource params = new MapSqlParameterSource();
             params.addValue("msgId", tracker.getMsgId());
+            params.addValue("source", tracker.getSource());
             params.addValue("target", tracker.getTarget());
             params.addValue("batchId", tracker.getBatchId());
             params.addValue("flowType", tracker.getFlowType());
             params.addValue("msgType", tracker.getMsgType());
+            params.addValue("originalReq", tracker.getOrgnlReq());
             params.addValue("transformedJsonReq", jsonObject);
             params.addValue("originalReqCount", null);
+            params.addValue("invalidMsg", tracker.getInvalidReq());
             params.addValue("consolidateAmt", null);
+            params.addValue("replayCount", tracker.getReplayCount());
             params.addValue("intermediateReq", null);
             params.addValue("intemdiateCount", null);
             params.addValue("status", tracker.getStatus());
@@ -194,13 +198,13 @@ public class NilRepository {
             String sql = "WITH inserted AS ( " +
                     "    INSERT INTO network_il.msg_event_tracker ( " +
                     "        msg_id, source, target, batch_id, flow_type, msg_type, " +
-                    "        original_req, invalid_msg, replay_count, original_req_count, transformed_json_req " +
+                    "        original_req, invalid_msg, replay_count, original_req_count, transformed_json_req, " +
                     "        consolidate_amt, intermediate_req, intemdiate_count, status, " +
                     "        batch_creation_date, batch_timestamp, created_time, modified_timestamp, version " +
                     "    ) " +
                     "    VALUES ( " +
                     "        :msgId, :source, :target, :batchId, :flowType, :msgType, " +
-                    "        :originalReq, :invalidMsg, :replayCount, :originalReqCount, :transformed_json_req " +
+                    "        :originalReq, :invalidMsg, :replayCount, :originalReqCount, :transformed_json_req, " +
                     "        :consolidateAmt, :intermediateReq, :intemdiateCount, :status, " +
                     "        :batchCreationDate, :batchTimestamp, :createdTime, :modifiedTimestamp, :version " +
                     "    ) " +
@@ -260,7 +264,7 @@ public class NilRepository {
         //params.addValue("batch_creation_date", batchCreationDate);
         try {
             Integer count = namedParameterJdbcTemplate.queryForObject(validatePacs08Pacs02Query, params, Integer.class);
-            return (count != 0 ? Boolean.TRUE : Boolean.FALSE);
+            return (count == 0 ? Boolean.FALSE : Boolean.TRUE);
         } catch (Exception e) {
             throw new Camt5254ProcessorException("Issue while checking pacs008 status");
         }

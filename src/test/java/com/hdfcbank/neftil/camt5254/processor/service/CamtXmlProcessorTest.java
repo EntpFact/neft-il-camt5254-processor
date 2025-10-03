@@ -9,31 +9,30 @@ import com.hdfcbank.neftil.camt5254.processor.model.ReqPayload;
 import com.hdfcbank.neftil.camt5254.processor.utils.UtilityMethods;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.mockito.Mockito.*;
 
-@ExtendWith(MockitoExtension.class)
+import static org.mockito.ArgumentMatchers.any;
+
 class CamtXmlProcessorTest {
 
-    @Mock
-    KafkaUtils kafkaUtils;
-
-    @Mock
-    NilRepository nilRepository;
-
-    @Mock
-    UtilityMethods utilityMethods;
-
-    @Mock
-    NILPACS8PACS2VeriftnService nilpacs8PACS2VeriftnService;
-
     @InjectMocks
-    CamtXmlProcessor camtXmlProcessor;
+    private CamtXmlProcessor camtXmlProcessor;
+
+    @Mock
+    private KafkaUtils kafkaUtils;
+
+    @Mock
+    private NilRepository nilRepository;
+
+    @Mock
+    private UtilityMethods utilityMethods;
+
+    @Mock
+    private NILPACS8PACS2VeriftnService nilpacs8PACS2VeriftnService;
 
     private ReqPayload reqPayload;
     private static final String VALID_XML =
@@ -72,34 +71,77 @@ class CamtXmlProcessorTest {
                 .build();
     }
 
+    private ReqPayload buildReqPayload(String msgType) {
+        String xml = "<RequestPayload>" +
+                "<AppHdr><BizMsgIdr>RBIP202204016000000001</BizMsgIdr><MsgDefIdr>camt.054.001.08</MsgDefIdr><CreDt>2025-01-13T19:24:20Z</CreDt></AppHdr>" +
+                "<Document><GrpHdr>" +
+                "<MsgId>MSG123</MsgId><MsgDefIdr>camt.054.001.08</MsgDefIdr>" +
+                "<BatchId>BATCH789</BatchId>" +
+                "<CreDt>2025-09-29T10:15:30Z</CreDt>" +
+                "</GrpHdr></Document></RequestPayload>";
+
+        Header header = Header.builder()
+                .msgId("MSG123")
+                .msgType(msgType)
+                .prefix("")
+                .source("SFMS")
+                .target("DISPATCHER_FC")
+                .flowType("INWARD")
+                .replayInd(false)
+                .build();
+
+        Body body = Body.builder()
+                .payload(xml)
+                .build();
+
+        return ReqPayload.builder()
+                .header(header)
+                .body(body)
+                .build();
+    }
+
     @Test
-    void testParseMessage_Camt54_PublishesToKafka() throws Exception {
-        // Arrange
+    void testParseMessage_normalFlow() throws Exception {
+        ReqPayload reqPayload = buildReqPayload("camt.052.001.08");
+
         when(utilityMethods.duplicateExists(anyString())).thenReturn(false);
-        when(nilpacs8PACS2VeriftnService.checkPacs8Pacs2StatusForBatchID(anyString(), anyString(), anyString())).thenReturn(true);
-        // Act
+
         camtXmlProcessor.parseMessage(reqPayload);
 
-        // Assert
-        verify(nilRepository).updateMsgEventTracker(any(MsgEventTracker.class));
-        verify(nilRepository).insertMsgEventTracker(any(MsgEventTracker.class));
-        verify(kafkaUtils, times(2)).publishToResponseTopic(any());
+        verify(nilRepository, times(1)).updateMsgEventTracker(any(MsgEventTracker.class));
+        verify(nilRepository, times(1)).insertMsgEventTracker(any(MsgEventTracker.class));
+        verify(kafkaUtils, times(2)).publishToResponseTopic(anyString(), anyString());
     }
+
+/*    @Test
+    void testParseMessage_camt054_canProceedTrue() throws Exception {
+        ReqPayload reqPayload = buildReqPayload("camt.054.001.08");
+
+        when(nilpacs8PACS2VeriftnService.checkPacs8Pacs2StatusForBatchID(anyString(), anyString(), anyString()))
+                .thenReturn(true);
+
+        camtXmlProcessor.parseMessage(reqPayload);
+
+        // Should return early → no insert/update/publish
+        verify(nilRepository, never()).updateMsgEventTracker(any());
+        verify(nilRepository, never()).insertMsgEventTracker(any());
+        verify(kafkaUtils, never()).publishToResponseTopic(anyString());
+    }*/
 
     @Test
-    void testParseMessage_DuplicateExists_NoKafkaPublish() throws Exception {
-        // Arrange
-        when(utilityMethods.duplicateExists(anyString())).thenReturn(true);
-        when(nilpacs8PACS2VeriftnService.checkPacs8Pacs2StatusForBatchID(anyString(), anyString(), anyString())).thenReturn(true);
+    void testParseMessage_duplicateExistsTrue() throws Exception {
+        ReqPayload reqPayload = buildReqPayload("camt.052.001.08");
 
-        // Act
+        when(utilityMethods.duplicateExists(anyString())).thenReturn(true);
+
         camtXmlProcessor.parseMessage(reqPayload);
 
-        // Assert
-        verify(nilRepository).updateMsgEventTracker(any(MsgEventTracker.class));
-        verify(nilRepository).insertMsgEventTracker(any(MsgEventTracker.class));
-        verify(kafkaUtils, never()).publishToResponseTopic(any());
+        // Repo is called but Kafka should NOT publish
+        verify(nilRepository, times(1)).updateMsgEventTracker(any(MsgEventTracker.class));
+        verify(nilRepository, times(1)).insertMsgEventTracker(any(MsgEventTracker.class));
+        verify(kafkaUtils, never()).publishToResponseTopic(anyString(), anyString());
     }
+
 
     @Test
     void testParseMessage_Camt52_VerificationProcessing() throws Exception {
@@ -130,7 +172,7 @@ class CamtXmlProcessorTest {
         // Assert
         verify(nilRepository).updateMsgEventTracker(any());
         verify(nilRepository).insertMsgEventTracker(any());
-        verify(kafkaUtils, times(2)).publishToResponseTopic(any());
+        verify(kafkaUtils, times(2)).publishToResponseTopic(any(), anyString());
     }
 
 

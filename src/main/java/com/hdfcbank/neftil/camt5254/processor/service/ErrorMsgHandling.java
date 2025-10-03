@@ -54,8 +54,8 @@ public class ErrorMsgHandling {
 
 
             // Send to dispatcher topic
-            kafkaUtils.publishToResponseTopic(jsonFC);
-            kafkaUtils.publishToResponseTopic(jsonEPH);
+            kafkaUtils.publishToResponseTopic(jsonFC, reqPayload.getHeader().getMsgId());
+            kafkaUtils.publishToResponseTopic(jsonEPH, reqPayload.getHeader().getMsgId());
 
             log.info("CAMT52 | CAMT54 Json FC: {}", jsonFC);
             log.info("CAMT52 | CAMT54 Json EPH: {}", jsonEPH);

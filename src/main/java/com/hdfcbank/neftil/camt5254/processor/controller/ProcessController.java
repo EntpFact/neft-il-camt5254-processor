@@ -1,6 +1,7 @@
 package com.hdfcbank.neftil.camt5254.processor.controller;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hdfcbank.neftil.camt5254.processor.exception.Camt5254ProcessorException;
 import com.hdfcbank.neftil.camt5254.processor.model.ReqPayload;
@@ -46,41 +47,19 @@ public class ProcessController {
 
     @CrossOrigin
     @PostMapping("/process")
-    public Mono<ResponseEntity<Response>> process(@RequestBody Map<String, Object> requestMsg) throws JsonProcessingException {
+    public Mono<ResponseEntity<Response>> process(@RequestBody String request) throws JsonProcessingException {
         log.info("....Processing Started.... ");
         return Mono.fromCallable(() -> {
             try {
 
-                log.info("Incoming XML: {}", requestMsg);
+                log.info("Incoming XML: {}", request);
                 // Get base64 encoded data
-                String requestBody = decodeMessage(requestMsg);
-                ReqPayload reqPayload = objectMapper.readValue(requestBody, ReqPayload.class);
-
-                if (reqPayload.getHeader().isInvalidPayload()) {
+                ReqPayload reqPayload  = decodeMessage(request);
+                if (reqPayload != null && reqPayload.getHeader().isInvalidPayload()) {
                     errorMsgHandling.errorMessageAudit(reqPayload);
                 } else {
                     camtXmlProcessor.parseMessage(reqPayload);
                 }
-
-                //boolean isJson = isJsonMesage(requestBody);
-
-
-/*
-                String request = "";
-                // Parse the incoming CloudEvent JSON
-                JsonNode jsonNode = objectMapper.readTree(requestBody);
-                log.info("Request Body : {}",requestBody);
-
-                if (jsonNode.has("data") && !jsonNode.get("data").isNull()) {
-                    request = jsonNode.get("data").asText();
-                } else {
-                    request = objectMapper.writeValueAsString(jsonNode);  // Convert entire JSON back to String
-                }
-
-               */
-
-                // Step 2: Parse the extracted data string into MessageEventTracker
-                //MessageEventTracker tracker = objectMapper.readValue(request, MessageEventTracker.class);
 
                 return ResponseEntity.ok(new Response("SUCCESS", "Message Processed."));
             } catch (Exception ex) {
@@ -94,20 +73,18 @@ public class ProcessController {
         });
     }
 
-    private String decodeMessage(Map<String, Object> request) {
-        String base64Data = (String) request.get("data_base64");
+    private ReqPayload decodeMessage(String request) throws JsonProcessingException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        JsonNode rootNode = objectMapper.readTree(request);
 
-        // Decode base64 data to XML message
-        String message = new String(Base64.getDecoder().decode(base64Data), StandardCharsets.UTF_8);
+        String base64Data = rootNode.get("data_base64").asText();
+        String reqPayloadString = new String(Base64.getDecoder().decode(base64Data), StandardCharsets.UTF_8);
+        reqPayloadString = objectMapper.readValue(reqPayloadString, String.class);
+        log.info("reqPayloadString: {}", reqPayloadString);
+        ReqPayload reqpayload = objectMapper.readValue(reqPayloadString, ReqPayload.class);
+        log.info("Decoded XML: {}", reqpayload);
 
-        // Remove BOM if exists and trim any extra whitespace
-        message = removeBOM(message);
-        message = message.trim();
-
-        // Log the decoded XML message for debugging
-        log.info("Decoded XML: {}", message);
-
-        return message;
+        return reqpayload;
     }
 
 

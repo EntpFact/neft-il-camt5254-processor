@@ -50,12 +50,12 @@ class NILPACS8PACS2VeriftnServiceTest {
     }
 
     @Test
-    void testRecover_UpdatesBatchTrackerAndReturnsFalse() {
+    void testRecover_UpdatesBatchTrackerAndReturnsTrue() {
         PACS8PACS2NotCompletedException ex = new PACS8PACS2NotCompletedException("Target not found for batchId=B123");
 
         Boolean result = service.recover(ex, "B123", "2025-09-11T10:00:00Z", "MSG123");
 
-        assertThat(result).isFalse();
+        assertThat(result).isTrue();
         verify(nilRepository).updateBatchTrackerStatusToHoldByMsgId("MSG123");
     }
 

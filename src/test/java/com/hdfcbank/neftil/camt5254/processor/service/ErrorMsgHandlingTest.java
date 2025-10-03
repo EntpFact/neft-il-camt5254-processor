@@ -58,7 +58,7 @@ class ErrorMsgHandlingTest {
         // then
         verify(nilRepository, times(1)).updateMsgEventTracker(any(MsgEventTracker.class));
         verify(nilRepository, times(1)).insertMsgEventTracker(any(MsgEventTracker.class));
-        verify(kafkaUtils, times(2)).publishToResponseTopic(anyString());
+        verify(kafkaUtils, times(2)).publishToResponseTopic(anyString(), anyString());
 
         // Capture FC tracker
         ArgumentCaptor<MsgEventTracker> fcCaptor = ArgumentCaptor.forClass(MsgEventTracker.class);

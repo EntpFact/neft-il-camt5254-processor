@@ -34,7 +34,7 @@ class KafkaUtilsTest {
         when(daprProducer.invokeDaprPublishEvent(any(PubSubOptions.class)))
                 .thenReturn(Mono.just("SUCCESS"));
 
-        kafkaUtils.publishToResponseTopic("test-message");
+        kafkaUtils.publishToResponseTopic("test-message", anyString());
 
         // Verify daprProducer was called once
         verify(daprProducer, times(1)).invokeDaprPublishEvent(any(PubSubOptions.class));
@@ -46,7 +46,7 @@ class KafkaUtilsTest {
         when(daprProducer.invokeDaprPublishEvent(any(PubSubOptions.class)))
                 .thenReturn(Mono.error(new RuntimeException("Kafka error")));
 
-        kafkaUtils.publishToResponseTopic("test-message");
+        kafkaUtils.publishToResponseTopic("test-message", anyString());
 
         // Verify daprProducer was still called
         verify(daprProducer, times(1)).invokeDaprPublishEvent(any(PubSubOptions.class));

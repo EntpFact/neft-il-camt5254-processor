@@ -3,7 +3,7 @@ package com.hdfcbank.neftil.camt5254.processor.utils;
 public class Constants {
 
 
-    public static final String KAFKA_RESPONSE_TOPIC_DAPR_BINDING = "kafka-nilrouter-pubsub-component";
+    public static final String KAFKA_RESPONSE_TOPIC_DAPR_BINDING = "kafka-neftilcamt5254-pubsub-component";
     public static final String INWARD = "INWARD";
     public static final String SFMS = "SFMS";
     public static final String DISPATCHER_FC = "FC_DISPATCHER";

@@ -69,7 +69,7 @@ public class CamtXmlProcessor {
 
             if (msgType.equals("camt.054.001.08")) {
                 Boolean canProceed = nilpacs8PACS2VeriftnService.checkPacs8Pacs2StatusForBatchID(batchId, batchDateTime, msgId);
-                if (Boolean.TRUE.equals(!canProceed)) {
+                if (Boolean.TRUE.equals(canProceed)) {
                     return;
                 }
             }
@@ -103,8 +103,8 @@ public class CamtXmlProcessor {
 
             if (!utilityMethods.duplicateExists(msgId)) {
                 // Send to FC and EPH topic
-                kafkaUtils.publishToResponseTopic(jsonFC);
-                kafkaUtils.publishToResponseTopic(jsonEPH);
+                kafkaUtils.publishToResponseTopic(jsonFC,msgId);
+                kafkaUtils.publishToResponseTopic(jsonEPH,msgId);
 
                 log.info("CAMT52 | CAMT54 Json FC: {}", jsonFC);
                 log.info("CAMT52 | CAMT54 Json EPH: {}", jsonEPH);
